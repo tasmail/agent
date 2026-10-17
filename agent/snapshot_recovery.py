@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from agent.backup_storage import endpoint_options
 from agent.job import job, step
 from agent.server import Server
 from agent.utils import db_dump_cli
@@ -188,12 +189,14 @@ class SnapshotRecovery(Server):
                 aws_access_key_id=auth["ACCESS_KEY"],
                 aws_secret_access_key=auth["SECRET_KEY"],
                 region_name=region,
+                **endpoint_options(auth),
             )
         else:
             s3 = boto3.client(
                 "s3",
                 aws_access_key_id=auth["ACCESS_KEY"],
                 aws_secret_access_key=auth["SECRET_KEY"],
+                **endpoint_options(auth),
             )
 
         for backup_file in backup_files.values():
