@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from agent.backup_storage import endpoint_options, streaming_endpoint
 from agent.base import AgentException, Base
 from agent.database import Database
 from agent.job import job, step
@@ -659,12 +660,14 @@ class Site(Base):
                     aws_access_key_id=auth["ACCESS_KEY"],
                     aws_secret_access_key=auth["SECRET_KEY"],
                     region_name=region,
+                    **endpoint_options(auth),
                 )
             else:
                 s3 = boto3.client(
                     "s3",
                     aws_access_key_id=auth["ACCESS_KEY"],
                     aws_secret_access_key=auth["SECRET_KEY"],
+                    **endpoint_options(auth),
                 )
 
             for backup_file in backup_files.values():
@@ -1073,7 +1076,7 @@ print(">>>" + frappe.session.sid + "<<<")
                 providers = {
                     "AWS S3": ("AWS", f"s3.{auth['REGION']}.amazonaws.com"),
                 }
-                rclone_provider, endpoint = providers[auth["PROVIDER"]]
+                rclone_provider, endpoint = streaming_endpoint(auth, providers)
                 s3_flags = [
                     "--s3-provider",
                     rclone_provider,
