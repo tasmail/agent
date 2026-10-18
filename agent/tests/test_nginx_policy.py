@@ -112,6 +112,37 @@ class TestNginxPolicy(unittest.TestCase):
         self.assertIn("real_ip_header CF-Connecting-IP;", proxy)
         self.assertIn("$proxy_add_x_forwarded_for", self.render("bench/nginx.conf.jinja2"))
 
+    def test_native_vts_module_accounting_and_authenticated_metrics_survive_regeneration(self):
+        directory = self.root / "nginx"
+        directory.mkdir()
+        self.config.update(
+            nginx_directory=str(directory),
+            nginx_vts_module_enabled=True,
+            web_port=18000,
+            tls_directory=str(self.root),
+        )
+        self.save()
+        for _ in range(2):
+            server = Server(str(self.root))
+            server._generate_nginx_config()
+            server._generate_agent_nginx_config()
+            main = (directory / "nginx.conf").read_text()
+            endpoint = (self.root / "nginx.conf").read_text()
+            self.assertEqual(main.count("load_module modules/ngx_http_vhost_traffic_status_module.so;"), 1)
+            self.assertEqual(len(re.findall(r"(?m)^\s*vhost_traffic_status_zone\b", main)), 1)
+            self.assertIn("vhost_traffic_status_zone shared:vhost_traffic_status:256m;", main)
+            self.assertIn("location /metrics/nginx {", endpoint)
+            self.assertIn("vhost_traffic_status_display_format prometheus;", endpoint)
+            self.assertIn('auth_basic "Prometheus";', endpoint)
+            self.assertIn("auth_basic_user_file", endpoint)
+
+    def test_native_vts_remains_disabled_by_default(self):
+        main = self.render("nginx/nginx.conf.jinja2")
+        endpoint = self.render("agent/nginx.conf.jinja2")
+        self.assertNotIn("ngx_http_vhost_traffic_status_module.so", main)
+        self.assertNotIn("vhost_traffic_status_zone", main)
+        self.assertNotIn("location /metrics/nginx {", endpoint)
+
     def test_invalid_options_fail_before_overwriting_output(self):
         self.output.write_text("previous valid configuration")
         for key, values in {
