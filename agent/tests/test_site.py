@@ -235,6 +235,10 @@ class TestSite(unittest.TestCase):
         output_file = os.path.join(self.test_dir, "nginx.conf")
         with patch.object(Server, "__init__", new=lambda x: None):
             server = Server()
+        # The native renderer now reads host-owned policy, not site-controlled context.
+        server.config_file = os.path.join(self.test_dir, "nginx-render-config.json")
+        with open(server.config_file, "w") as stream:
+            json.dump({}, stream)
 
         context = {
             "bench_name": self.bench_name,
