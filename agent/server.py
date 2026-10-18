@@ -30,6 +30,7 @@ from agent.bench import Bench
 from agent.exceptions import BenchNotExistsException, RegistryDownException
 from agent.job import Job, Step, job, step
 from agent.nfs_handler import NFSHandler
+from agent.nginx_policy import nginx_policy_options
 from agent.patch_handler import run_patches
 from agent.site import Site
 from agent.utils import get_supervisor_processes_status, is_registry_healthy
@@ -1310,14 +1311,25 @@ class Server(Base):
                 raise e
 
     def _render_template(self, template, context, outfile, options=None):
+        if template in {
+            "nginx/nginx.conf.jinja2",
+            "agent/nginx.conf.jinja2",
+            "proxy/nginx.conf.jinja2",
+            "bench/nginx.conf.jinja2",
+        }:
+            policy = nginx_policy_options(self.config)
+            if template == "bench/nginx.conf.jinja2" and not context.get("standalone"):
+                policy["nginx_server_include"] = policy["nginx_backend_server_include"]
+            context = {**context, **policy}
         if options is None:
             options = {}
         options.update({"loader": PackageLoader("agent", "templates")})
         environment = Environment(**options)
         template = environment.get_template(template)
 
+        rendered = template.render(**context)
         with open(outfile, "w") as f:
-            f.write(template.render(**context))
+            f.write(rendered)
 
     def _update_supervisor(self):
         self.execute("sudo supervisorctl reread")

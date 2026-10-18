@@ -1,3 +1,10 @@
+{%- macro canonical_forwarding_headers() -%}
+{% if nginx_canonical_forwarding -%}
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Real-IP $remote_addr;
+{%- endif %}
+{%- endmacro -%}
+{% if not nginx_external_real_ip -%}
 # Recover the real client IP for traffic arriving via Cloudflare.
 # Only connections from these ranges are trusted; direct traffic is untouched.
 # Ranges from https://www.cloudflare.com/ips-v4 and https://www.cloudflare.com/ips-v6
@@ -24,6 +31,7 @@ set_real_ip_from 2405:8100::/32;
 set_real_ip_from 2a06:98c0::/29;
 set_real_ip_from 2c0f:f248::/32;
 real_ip_header CF-Connecting-IP;
+{% endif %}
 
 map $host $subdomain_map {
     ~^(?<subdomain>[^.]*).*$ $subdomain.{{ domain }};
@@ -135,6 +143,9 @@ proxy_cache_path /tmp/cache keys_zone=proxy_cache_zone:10m loader_threshold=300 
 {% set ns = namespace(host=host, cert_host=host) %}
 
 server {
+	{% if nginx_server_include %}
+	include {{ nginx_server_include }};
+	{% endif %}
 	listen 443 http2 ssl{% if ns.host.strip("*.") == domain %} default_server{% endif %};
 	server_name {{ ns.host }};
 
@@ -191,14 +202,19 @@ server {
 		proxy_cache_bypass $http_secret_cache_purge;
 
 		proxy_set_header Host $host;
+		{% if not nginx_canonical_forwarding %}
 		proxy_set_header X-Real-IP $remote_addr;
+		{% endif %}
+		{% if not nginx_canonical_forwarding %}
 		proxy_set_header X-Forwarded-For $remote_addr;
+		{% endif %}
 		proxy_set_header X-Forwarded-Proto $scheme;
 		proxy_set_header Connection "";
 
 		more_set_headers "X-Proxy-Upstream: $upstream_server_hash";
 		more_set_headers "X-Proxy-Cache: $upstream_cache_status";
 
+		{{ canonical_forwarding_headers() }}
 		proxy_pass $upstream_server_hash;
 	}
 
@@ -206,13 +222,18 @@ server {
 		proxy_http_version 1.1;
 		proxy_set_header Upgrade $http_upgrade;
 		proxy_set_header Host $host;
+		{% if not nginx_canonical_forwarding %}
 		proxy_set_header X-Real-IP $remote_addr;
+		{% endif %}
+		{% if not nginx_canonical_forwarding %}
 		proxy_set_header X-Forwarded-For $remote_addr;
+		{% endif %}
 		proxy_set_header X-Forwarded-Proto $scheme;
 		proxy_set_header Connection "upgrade";
 
 		more_set_headers "X-Proxy-Upstream: $socket_upstream_hash";
 
+		{{ canonical_forwarding_headers() }}
 		proxy_pass $socket_upstream_hash;
 	}
 
@@ -226,8 +247,12 @@ server {
 		proxy_busy_buffers_size 8k;
 
 		proxy_set_header Host $host;
+		{% if not nginx_canonical_forwarding %}
 		proxy_set_header X-Real-IP $remote_addr;
+		{% endif %}
+		{% if not nginx_canonical_forwarding %}
 		proxy_set_header X-Forwarded-For $remote_addr;
+		{% endif %}
 		proxy_set_header X-Client-Port $remote_port;
 		proxy_set_header X-Request-Start "t=${msec}";
 		proxy_set_header X-Forwarded-Proto $scheme;
@@ -247,6 +272,7 @@ server {
 		more_set_headers "Access-Control-Allow-Credentials: $access_control_allow_credentials";
 		more_set_headers "Access-Control-Allow-Methods: $access_control_allow_methods";
 
+		{{ canonical_forwarding_headers() }}
 		proxy_pass $upstream_server_hash;
 	}
 
@@ -275,6 +301,9 @@ server {
 {% endfor %}
 
 server {
+	{% if nginx_server_include %}
+	include {{ nginx_server_include }};
+	{% endif %}
 	listen 80;
 	server_name _;
 

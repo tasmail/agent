@@ -1,0 +1,17 @@
+name: Nginx policy contract
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-generation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e . pytest pytest-subtests
+      - name: Native nginx policy regression suite
+        run: pytest -q agent/tests/test_proxy.py agent/tests/test_server.py agent/tests/test_nginx_policy.py
