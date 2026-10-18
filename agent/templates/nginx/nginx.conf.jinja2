@@ -36,7 +36,6 @@ http {
 	{% endfor -%}
 
 	{% if nginx_vts_module_enabled %}
-	vhost_traffic_status_zone;
 	vhost_traffic_status_dump /var/log/nginx/vts.db;
 	vhost_traffic_status_filter_by_host on;
 	vhost_traffic_status_zone shared:vhost_traffic_status:256m;
