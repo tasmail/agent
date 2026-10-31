@@ -1145,6 +1145,13 @@ def proxy_remove_redirects():
     return {"job": job}
 
 
+@application.route("/proxy/hosts/allowlist", methods=["POST"])
+def proxy_set_allowlist():
+    data = request.json
+    job = Proxy().set_allowlist_job(data["domains"], data.get("cidrs") or [])
+    return {"job": job}
+
+
 @application.route("/proxy/hosts/<string:host>", methods=["DELETE"])
 def proxy_remove_host(host):
     job = Proxy().remove_host_job(host)
