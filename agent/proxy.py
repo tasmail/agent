@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import re
 import shutil
 from collections import defaultdict
 from contextlib import contextmanager
@@ -314,6 +316,59 @@ class Proxy(Server):
         with open(redirect_file, "w") as r:
             json.dump(redirects, r, indent=4)
 
+    @staticmethod
+    def _allowlist_networks(cidrs):
+        """The normalized networks of an allowlist; an unknown form is refused before anything is written."""
+        networks = []
+        for cidr in cidrs:
+            try:
+                network = str(ipaddress.ip_network(str(cidr).strip(), strict=False))
+            except ValueError:
+                raise ValueError(f"Not an IP address or network: {cidr!r}") from None
+            if network not in networks:
+                networks.append(network)
+        return networks
+
+    @job("Set IP Allowlist on Hosts")
+    def set_allowlist_job(self, hosts, cidrs):
+        """Only these addresses may reach each host (any host name, also one below a wildcard);
+        an empty list removes the restriction."""
+        networks = self._allowlist_networks(cidrs)
+        for host in hosts:
+            if not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", host):
+                raise ValueError(f"Not a host name: {host!r}")
+        with self.proxy_config_modification_lock:
+            for host in hosts:
+                self.set_allowlist(host, networks)
+        self.reload_nginx()
+
+    @step("Set IP Allowlist on Host")
+    @with_proxy_config_lock()
+    def set_allowlist(self, host, networks):
+        path = os.path.join(self.allowlists_directory, f"{host}.json")
+        if not networks:
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        os.makedirs(self.allowlists_directory, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(networks, f, indent=4)
+
+    @property
+    def allowlists_directory(self):
+        return os.path.join(self.nginx_directory, "allowlists")
+
+    @property
+    def allowlists(self) -> dict[str, list[str]]:
+        """host -> the networks that may reach it; a host without a file is open."""
+        found = {}
+        if os.path.isdir(self.allowlists_directory):
+            for name in sorted(os.listdir(self.allowlists_directory)):
+                if name.endswith(".json"):
+                    with open(os.path.join(self.allowlists_directory, name)) as f:
+                        found[name[: -len(".json")]] = json.load(f)
+        return found
+
     @job("Remove Redirects on Hosts")
     def remove_redirects_job(self, hosts):
         with self.proxy_config_modification_lock:
@@ -345,6 +400,7 @@ class Proxy(Server):
         with self.proxy_config_modification_lock:
             data = {
                 "hosts": self.hosts,
+                "allowlists": self.allowlists,
                 "upstreams": self.upstreams,
                 "domain": config["domain"],
                 "wildcards": sorted(self.wildcards, key=lambda x: len(x)),

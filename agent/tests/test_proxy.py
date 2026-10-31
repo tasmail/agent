@@ -292,6 +292,46 @@ class TestProxy(unittest.TestCase):
         dhparam_file = os.path.join(self.test_dir, "ffdhe2048.pem")
         self.assertIn(f"ssl_dhparam {dhparam_file};", rendered)
 
+    def _set_allowlist(self, proxy, hosts, cidrs):
+        with patch.object(Proxy, "set_allowlist", new=Proxy.set_allowlist.__wrapped__):
+            networks = Proxy._allowlist_networks(cidrs)
+            for host in hosts:
+                proxy.set_allowlist(host, networks)
+
+    def test_allowlist_is_stored_per_host_normalized_and_removed_when_empty(self):
+        proxy = self._get_fake_proxy()
+        self._set_allowlist(proxy, ["site-qa.balu.codes", self.default_domain], ["203.0.113.7", "10.1.2.3/8", "203.0.113.7"])
+        self.assertDictEqual(
+            proxy.allowlists,
+            {
+                "site-qa.balu.codes": ["203.0.113.7/32", "10.0.0.0/8"],
+                self.default_domain: ["203.0.113.7/32", "10.0.0.0/8"],
+            },
+        )
+        self._set_allowlist(proxy, ["site-qa.balu.codes"], [])
+        self.assertEqual(list(proxy.allowlists), [self.default_domain])
+        self.assertFalse(os.path.exists(os.path.join(proxy.hosts_directory, "site-qa.balu.codes")))
+
+    def test_allowlist_refuses_something_that_is_not_an_address_before_writing(self):
+        for bad in ("not-an-ip", "1.2.3.4/33", "1.2.3.4; deny all", "*"):
+            with self.assertRaises(ValueError):
+                Proxy._allowlist_networks([bad])
+
+    def test_generated_proxy_config_denies_a_restricted_host_outside_its_allowlist(self):
+        proxy = self._get_fake_proxy()
+        self._set_allowlist(proxy, ["site.frappe.cloud"], ["203.0.113.0/24", "2001:db8::/32"])
+        rendered = self._render_proxy_config()
+
+        self.assertRegex(rendered, r"geo \$deny_ip_1 \{\s+default 1;\s+203.0.113.0/24 0;\s+2001:db8::/32 0;\s+\}")
+        self.assertRegex(rendered, r"map \$host \$deny_request \{\s+default 0;\s+site.frappe.cloud \$deny_ip_1;\s+\}")
+        self.assertIn("if ($deny_request) {\n\t\treturn 403;", rendered)
+
+    def test_generated_proxy_config_has_no_allowlist_rules_when_none_is_set(self):
+        rendered = self._render_proxy_config()
+
+        self.assertNotIn("deny_request", rendered)
+        self.assertNotIn("geo ", rendered)
+
     def test_shipped_dhparam_file_is_the_ffdhe2048_group(self):
         """Test agent ships Mozilla's ffdhe2048 group, the one ssl_dhparam points to."""
         dhparam_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tls", "ffdhe2048.pem")

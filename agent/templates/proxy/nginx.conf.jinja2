@@ -128,6 +128,26 @@ map $upstream_http_access_control_allow_methods $access_control_allow_methods {
 	"" "GET, POST, OPTIONS";
 }
 
+{% if allowlists %}
+{# A host with an allowlist answers 403 to every address outside it. Works for a host with a server block of
+   its own and for a site below a wildcard host, because it is keyed by $host. #}
+{% for host, networks in allowlists.items() %}
+geo $deny_ip_{{ loop.index }} {
+	default 1;
+	{% for network in networks %}
+	{{ network }} 0;
+	{% endfor %}
+}
+{% endfor %}
+
+map $host $deny_request {
+	default 0;
+	{% for host in allowlists %}
+	{{ host }} $deny_ip_{{ loop.index }};
+	{% endfor %}
+}
+{% endif %}
+
 proxy_cache_path /tmp/cache keys_zone=proxy_cache_zone:10m loader_threshold=300 loader_files=200 max_size=200m;
 
 {% for host, host_options in hosts.items() %}
@@ -137,6 +157,12 @@ proxy_cache_path /tmp/cache keys_zone=proxy_cache_zone:10m loader_threshold=300 
 server {
 	listen 443 http2 ssl{% if ns.host.strip("*.") == domain %} default_server{% endif %};
 	server_name {{ ns.host }};
+
+	{% if allowlists %}
+	if ($deny_request) {
+		return 403;
+	}
+	{% endif %}
 
 	{%- for wildcard_domain in wildcards -%}
 		{%- if ns.host.endswith("." + wildcard_domain) -%}
